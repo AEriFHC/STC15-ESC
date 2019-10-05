@@ -151,14 +151,31 @@ void main()
 	while(1) 
 	{
 		//DutyCycle = 888;
-		DutyCycle = DutyCount > (D_Min + 20) ? (DutyCount - D_Min) : 0;
+		//DutyCycle = DutyCount > (D_Min + 20) ? (DutyCount - D_Min) : 0;
+		if(DutyCount > (D_Min + 20))
+		{
+			if(DutyCycle + D_Min > DutyCount + 10)  //Lower than the threshold
+			{
+				DutyCycle -= 10;  //Limit the derivative
+			}
+			else if(DutyCycle + D_Min < DutyCount - 10)  //Higher than the threshold
+			{
+				DutyCycle += 10;
+			}
+		}
+		else
+		{
+			DutyCycle = 0;
+		}
+		WDT_CONTR = 0x13;
+		
 		if(DutyCycle)     //Process will be started if D > 1%
 		{
 			if(!flag)       //And maintain >1% for more than 33mS;
 			{
 				
 				flag = 1;
-				for(P3_Tem = 0; P3_Tem <10; P3_Tem++) // Wait 33*10mS
+				for(P3_Tem = 0; P3_Tem < 20; P3_Tem++) // Wait 33*20mS
 				{
 					T2OF2 = 0;                
 					while(!T2OF2);
@@ -169,8 +186,78 @@ void main()
 						break;
 					}
 				}
-
+				/*
+				if(flag) //Start 
+				{
+					EX0 = 0;
+					for(P3_Tem = 0; P3_Tem < 12; P3_Tem++)
+					{
+						for(Phase = 0; Phase < 12; Phase++)
+						{
+							switch(Phase)
+							{
+								case  0:P3M1  = 0x07; //AB P3:XX54 3210
+												Output_A = 1; //        BA   C
+												Output_B = 0;
+												Output_C = 1;
+												break;
+								case  1:Output_A = 0;
+												Output_B = 0;
+											  break;
+								case  2:P3M1  = 0x25; //AC
+												Output_A = 1;
+												Output_B = 1;
+												Output_C = 0;
+											  break;
+								case  3:Output_A = 0;
+												Output_C = 0; 
+											  break;	
+								case  4:P3M1  = 0x15; //BC
+												Output_A = 1;
+												Output_B = 1;
+												Output_C = 0; 
+											  break;
+								case  5:Output_C = 0;
+												Output_B = 0;
+											  break;
+								case  6:P3M1  = 0x07; //BA
+												Output_A = 0;
+												Output_B = 1;
+												Output_C = 1;
+												break;												
+								case  7:Output_A = 0;
+												Output_B = 0;
+											  break;				
+								case  8:P3M1  = 0x25; //CA
+												Output_A = 0;
+												Output_B = 1;
+												Output_C = 1;
+											  break;				
+								case  9:Output_A = 0;
+												Output_C = 0;
+											  break;				
+								case 10:P3M1  = 0x15; //CB 
+												Output_A = 1;
+												Output_B = 0;
+												Output_C = 1; 
+											  break;				
+								case 11:Output_C = 0;
+												Output_B = 0;
+											  break;
+								default:IAP_CONTR |= 0x10;//Reset
+							}
+							Pin = TH2;
+							while(TH2 - Pin < 4); //4*256*0.5 = 0.512mS
+						}
+						WDT_CONTR = 0x13;
+					}
+					P3M1 = 0x37;
+					P3  |= 0x32;
+					Phase = 0;
+				}*/
+				//DutyCycle = 2000;
 			}
+			
 			else
 		{
 			flag = 0;
@@ -410,12 +497,12 @@ void Sound(unsigned char Time_500mS, unsigned char Note)
 	TH2 = k>>8;
 	TL2 = k;
 	AUXR = 0x90;  
-	Output_A = 1;
+	Output_B = 1;
 	Output_C = 0;
 	for(j = 0; j <= c ; j++)
 	{
 		while(!T2OF2);
-		Output_A = !Output_A;
+		Output_B = !Output_B;
 		T2OF1 = 0;
 		T2OF2 = 0;
 		Output_C = !Output_C;
@@ -425,7 +512,7 @@ void Sound(unsigned char Time_500mS, unsigned char Note)
 	TH2 = 0;
 	TL2 = 0;
 	P3M1 = 0x37;
-	Output_A = 1;
+	Output_B = 1;
 	Output_C = 1;
 }
 
@@ -434,9 +521,9 @@ void OutputPWM_Control() interrupt 1   //SQ: 00, 01, 10  ON OFF FLOAT
 	EX0  = 1;
 	P3M1 = 0x37;
 	P3  |= 0x32;               //Prevent two MOSFETs turn on at the same time
-  if(!PWM_SQ1 && !PWM_SQ2)
+  if(!PWM_SQ1 && !PWM_SQ2)   //Step 0:Output high
 	{
-		if(PWM_EN1)
+		if(PWM_EN1)              //To step 1
 		{
 			PWM_SQ1 = 1;
 			PWM_SQ2 = 0;
@@ -454,7 +541,7 @@ void OutputPWM_Control() interrupt 1   //SQ: 00, 01, 10  ON OFF FLOAT
 		P3  &= ~Pin;            //Turn high side MOSFET on
 	}                         //E.G. 0011 0010 &= ~0001 0000 means turn phase A's high side MOSFET on
 
-  else if(PWM_SQ1 && !PWM_SQ2)
+  else if(PWM_SQ1 && !PWM_SQ2) //Step1:Output low
 	{
 		EX0  = 0;               	 //Disable zero-detection during this step
 		if(PWM_EN2)
@@ -475,7 +562,7 @@ void OutputPWM_Control() interrupt 1   //SQ: 00, 01, 10  ON OFF FLOAT
 		P3M1 = PinMode;            //Turn low side MOSFET on
 	}
 	
-	else if(!PWM_SQ1 && PWM_SQ2)
+	else if(!PWM_SQ1 && PWM_SQ2) //Step 2:Float
 	{
 		PWM_SQ1 = 0;
 		PWM_SQ2 = 0;
@@ -547,7 +634,7 @@ void InputSignal() interrupt 2
 	}
 }
 
-void LowVoltage() interrupt 6
+void LowVoltage() interrupt 6 //Must not be empty otherwise somehow the output function can't work properly
 {
 	/*P3M1 = 0x37;
 	P3  |= 0x32;*/
