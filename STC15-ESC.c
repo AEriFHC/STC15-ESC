@@ -2,7 +2,7 @@
 
 #define DisableFilter
 #define DisableEVLD
-//Define Start or Start_Simple to active
+//Define Start or Start_Simple to active strat-up process
 
 sbit CurrentSense = P3^0;
 sbit Output_C     = P3^1;  //Output pin mode will not be open drain unless output needs to be floated
