@@ -1,5 +1,9 @@
 #include<reg51.h>
 
+#define DisableFilter
+#define DisableEVLD
+//Define Start or Start_Simple to active
+
 sbit CurrentSense = P3^0;
 sbit Output_C     = P3^1;  //Output pin mode will not be open drain unless output needs to be floated
 sbit PhaseChange  = P3^2;
@@ -58,7 +62,7 @@ void main()
 	AUXR2     = 0x40;             //INT4 Enable
 	IE2       = 0x04;						  //ET2 Enable
 	EX0       = 0;  
-	EX1       = 0;
+	EX1       = 0;                //Input signal
   Phase     = 0;               	//Initialization
 
 	if(EEPROM_Read(0x0000) == 0x01 && EEPROM_Read(0x0003) == 0x02)
@@ -186,7 +190,7 @@ void main()
 						break;
 					}
 				}
-				/*
+				#ifdef Start
 				if(flag) //Start 
 				{
 					EX0 = 0;
@@ -254,8 +258,10 @@ void main()
 					P3M1 = 0x37;
 					P3  |= 0x32;
 					Phase = 0;
-				}*/
-				//DutyCycle = 2000;
+				}
+				#elif defined Start_Simple
+				DutyCycle = 2000;
+				#endif
 			}
 			
 			else
@@ -376,7 +382,7 @@ void main()
 						
 			EX0 = 1;
 			T_PC1 = 400 * D_A / DutyCycle; //0.2mS/phase
-			T_PC1 = T_PC1 < 4000 ? T_PC1 : 4000;
+			T_PC1 = T_PC1 < 4000 ? T_PC1 : 4000; //Reuse T_PC1
 			while(!flag)                //60 degree
 			{
 				T_PCA  = TH2<<8;
@@ -398,6 +404,7 @@ void main()
 	}
 		else
 		{
+			flag = 0;
 			TR0  = 0;     //Turn PWM off
 			EX0  = 0;
 			P3M1 = 0x37;  //xx11 0111
@@ -579,7 +586,7 @@ void PhaseAndInputSignal_Control() interrupt 12
 	{
 		if(DutyCycle && !flag)
 		{
-			DutyCount -= 100;
+			DutyCount--;
 		}
 		else
 		{
@@ -593,6 +600,7 @@ void PhaseAndInputSignal_Control() interrupt 12
 
 void Phase_Commutation() interrupt 0
 {
+	#ifndef DisableFilter
 	T2_Int0_F -= TH2;
 	if(T2_Int0_F <= 1024/256 && !flag) // 0.512mS/phase
 	{
@@ -600,6 +608,10 @@ void Phase_Commutation() interrupt 0
 		flag = 1;
 	}
 	T2_Int0_F = TH2;                 //Software filter
+	#else
+	Phase++;
+	flag = 1;
+	#endif
 }
 
 void I_PeakLmit() interrupt 16
@@ -636,6 +648,8 @@ void InputSignal() interrupt 2
 
 void LowVoltage() interrupt 6 //Must not be empty otherwise somehow the output function can't work properly
 {
-	/*P3M1 = 0x37;
-	P3  |= 0x32;*/
+	#ifndef DisableEVLD
+	P3M1 = 0x37;
+	P3  |= 0x32;
+	#endif
 }
