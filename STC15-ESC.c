@@ -2,7 +2,8 @@
 
 #define DisableFilter
 #define DisableEVLD
-//Define Start or Start_Simple to active strat-up process
+//Define Start or Start_Simple to active
+#define Start
 
 sbit CurrentSense = P3^0;
 sbit Output_C     = P3^1;  //Output pin mode will not be open drain unless output needs to be floated
@@ -27,13 +28,14 @@ sfr IAP_TRIG  = 0xC6;
 sfr IAP_CONTR = 0xC7;
 sfr WDT_CONTR = 0xC1;  //Enable:0x23 Initiate:0x03 Clear: 0x13 Can't be shut down by software
 
-unsigned char Pin, PinMode, Phase = 0 ,I_C = 0, T_IC = 0, P3_Tem, T2_Int0_F;  //T_on:Period of time which output is high
+volatile unsigned char Pin, PinMode, Phase = 0 ,I_C = 0, T_IC = 0, P3_Tem, T2_Int0_F;  //T_on:Period of time which output is high
 //Pin,PinMode:pins will be operated in PWM  I_C:Record how many times current reach the limit(30A)
-unsigned int  T2_Int1_C, T2_PL_C, T_on = 65296, T_off = 65296, T_f = 0, D_Max = 4000, D_Min = 2000, DutyCount;
-unsigned int	T_PC1 = 65000, T_PC2 = 65000, T_PC3 = 65000, T_PCW = 10922, T_PCA = 65000;
+volatile unsigned int  T2_Int1_C, T2_PL_C, T_on = 65296, T_off = 65296, T_f = 0, D_Max = 4000, D_Min = 2000, DutyCount;
+volatile unsigned int  T_on_c = 65296, T_off_c = 65296, T_f_c = 0;//For calculation
+volatile unsigned int	T_PC1 = 65000, T_PC2 = 65000, T_PC3 = 65000, T_PCA = 65000, T_PCW = 10922;
 /*  T_PC:Register's value in timer, indicate the lenth of time which one phase take */
-unsigned long D_A, DutyCycle;
-bit flag = 0, ERROR_Flag = 0, T2OF1 = 0, T2OF2 = 0, PWM_EN1 = 1, PWM_EN2 = 1, PWM_SQ1 = 0, PWM_SQ2 = 0;
+volatile unsigned long D_A, DutyCycle;
+volatile bit flag = 0, ERROR_Flag = 0, T2OF1 = 0, T2OF2 = 0, PWM_EN1 = 1, PWM_EN2 = 1, PWM_SQ1 = 0, PWM_SQ2 = 0, PWM_EN1_c = 1, PWM_EN2_c = 1;
 
 unsigned char EEPROM_Read(unsigned int addr);
 unsigned char EEPROM_Erase(unsigned int addr);
@@ -177,7 +179,7 @@ void main()
 		{
 			if(!flag)       //And maintain >1% for more than 33mS;
 			{
-				
+				TR0 = 0;
 				flag = 1;
 				for(P3_Tem = 0; P3_Tem < 20; P3_Tem++) // Wait 33*20mS
 				{
@@ -194,6 +196,12 @@ void main()
 				if(flag) //Start 
 				{
 					EX0 = 0;
+					P3M1  = 0x07; //AB P3:XX54 3210
+					Output_A = 1; //        BA   C
+					Output_B = 0;
+					Output_C = 1;
+					Pin = TH2;
+					while(TH2 - Pin < 40);
 					for(P3_Tem = 0; P3_Tem < 12; P3_Tem++)
 					{
 						for(Phase = 0; Phase < 12; Phase++)
@@ -251,13 +259,20 @@ void main()
 								default:IAP_CONTR |= 0x10;//Reset
 							}
 							Pin = TH2;
-							while(TH2 - Pin < 4); //4*256*0.5 = 0.512mS
+							while(TH2 - Pin < 30 - P3_Tem - Phase); //4*256*0.5 = 0.512mS
 						}
 						WDT_CONTR = 0x13;
 					}
 					P3M1 = 0x37;
 					P3  |= 0x32;
 					Phase = 0;
+					Pin = 0x10;
+					DutyCycle = 200;
+					T_on = 65536 - 240;
+					T_off = 65536 - 240;
+					T_f = 63616;
+					TR0 = 1;
+					goto MAIN;
 				}
 				#elif defined Start_Simple
 				DutyCycle = 2000;
@@ -265,61 +280,67 @@ void main()
 			}
 			
 			else
-		{
+	  	{
+				#ifdef Start
+				MAIN:
+				#endif
 			flag = 0;
-			EX0 = 0;
 			
-			TR0  = 0;
-			P3M1 = 0x37;
-			P3  |= 0x32;
 			if(2 * DutyCycle >= D_A)        //D >= 0.5
 			{
-				T_on = (12 * 100 * DutyCycle) / D_A;
-				if(T_on < 12 * 96)
+				T_on_c = (12 * 100 * DutyCycle) / D_A;
+				if(T_on_c < 12 * 96)
 				{
-					T_off = 12 * 100 - T_on;
-					T_off = 65536 - T_off;
-					PWM_EN1 = 1;
+					T_off_c = 12 * 100 - T_on_c;
+					T_off_c = 65536 - T_off_c;
+					PWM_EN1_c = 1;
 				}
 				else
 				{
-					T_off = 65535;
-					PWM_EN1 = 0;
+					T_off_c = 65535;
+					PWM_EN1_c = 0;
 				}
-				T_f = 65535;
-				PWM_EN2 = 0;
-				T_on = 65536 - T_on;
+				T_f_c = 65535;
+				PWM_EN2_c = 0;
+				T_on_c = 65536 - T_on_c;
 			}
 			
 			else if(5 * DutyCycle >= D_A)  //0.2 <= D <= 0.5 
 			{
-				T_on = (12 * 100 * DutyCycle) / D_A;
-				T_off = T_on;
-				PWM_EN1 = 1;
-				if((T_on + T_off) < 12 * 96)
+				T_on_c = (12 * 100 * DutyCycle) / D_A;
+				T_off_c = T_on_c;
+				PWM_EN1_c = 1;
+				if((T_on_c + T_off_c) < 12 * 96)
 				{
-					T_f = 12 * 100 - 2 * T_on;
-					T_f = 65536 - T_f;
-					PWM_EN2 = 1;
+					T_f_c = 12 * 100 - 2 * T_on_c;
+					T_f_c = 65536 - T_f_c;
+					PWM_EN2_c = 1;
 				}
 				else
 				{
-					T_f = 65535;
-					PWM_EN2 = 0;
+					T_f_c = 65535;
+					PWM_EN2_c = 0;
 				}
-				T_on = 65536 - T_on;
-				T_off = 65536 - T_off;	
+				T_on_c = 65536 - T_on_c;
+				T_off_c = 65536 - T_off_c;	
 			}
 			
 			else                          //D < 0.2
 			{
-				T_on = 65536 - 12 * 20;     //Value directly load into timer 0's Register
-				T_off = 65536 - 12 * 20;    //PFM: Minimum turn on time:10uS
-				T_f = 65536 - (12 * 20 * D_A) / DutyCycle + 12 * 2 * 20;
-				PWM_EN1 = 1;
-				PWM_EN2 = 1;
+				T_on_c = 65536 - 12 * 20;     //Value directly load into timer 0's Register
+				T_off_c = 65536 - 12 * 20;    //PFM: Minimum turn on time:10uS
+				T_f_c = 65536 - (12 * 20 * D_A) / DutyCycle + 12 * 2 * 20;
+				PWM_EN1_c = 1;
+				PWM_EN2_c = 1;
 			}
-			
+			TR0 = 0;//Update dutycycle
+			P3M1 = 0x37;
+			P3  |= 0x32;
+			T_on = T_on_c;
+			T_off = T_off_c;
+			T_f = T_f_c;
+			PWM_EN1 = PWM_EN1_c;
+			PWM_EN2 = PWM_EN2_c;
 			PWM_SQ1 = 0;
 			PWM_SQ2 = 0;
 			TL0  = T_on; 
@@ -328,7 +349,9 @@ void main()
 			T2_PL_C  = TH2<<8;  //Record timer 2's Register value 
 			T2_PL_C |= TL2;
 			T2OF2 = 0;
-					
+			
+			WDT_CONTR = 0x13;
+			
 			T_PC1  = T_PC2;
 			T_PC2  = T_PC3;
 			T_PC3  = T_PCA;
@@ -336,23 +359,25 @@ void main()
 			T_PCA += T_PC2 / 3;
 			T_PCA += T_PC3 / 3;
 			T_PCW  = T_PCA / 2;
-			if(Phase >= 6)                        //252 % 6 = 0
-			{
-				Phase = 0;
-			}
 		
 			do                                   //30degree
 			{
 				T_PCA  = TH2<<8;
 				T_PCA |= TL2;
-				T_PCA -= T2_PL_C;                  //Lenth of this step
+				T_PCA -= T2_PL_C;                  //Length of this step
 				if(T2OF2)
 				{
 					T_PCA--;
 				}
 			}
-			while(T_PCA <= T_PCW);               
-				
+			while(T_PCA <= T_PCW);      
+					
+			
+			if(Phase >= 6)                        //252 % 6 = 0
+			{
+				Phase = 0;
+			}
+			
 			switch(Phase)           //Phase commutation
 			{
 				case 0: PinMode = 0x07;   //AB xx00 0111
@@ -379,11 +404,11 @@ void main()
 								Pin = 0x02;       //C  xx00 0010
 								break;
 			}
-						
+
 			EX0 = 1;
 			T_PC1 = 400 * D_A / DutyCycle; //0.2mS/phase
 			T_PC1 = T_PC1 < 4000 ? T_PC1 : 4000; //Reuse T_PC1
-			while(!flag)                //60 degree
+			while(!flag)               
 			{
 				T_PCA  = TH2<<8;
 				T_PCA |= TL2;
@@ -399,7 +424,9 @@ void main()
 					Phase++;
 				}
 			}
-
+			EX0 = 0;
+			
+			WDT_CONTR = 0x13;
 		}
 	}
 		else
@@ -582,7 +609,7 @@ void OutputPWM_Control() interrupt 1   //SQ: 00, 01, 10  ON OFF FLOAT
 
 void PhaseAndInputSignal_Control() interrupt 12
 {
-	if(T2OF1 == 1)        //Lose signal
+	//if(T2OF1 == 1)        //Lose signal
 	{
 		if(DutyCycle && !flag)
 		{
@@ -592,6 +619,7 @@ void PhaseAndInputSignal_Control() interrupt 12
 		{
 			TR0 = 0;
 			WDT_CONTR = 0x0B;  
+			T2OF1 = 0;
 		}
 	}
 	T2OF1 = 1;
